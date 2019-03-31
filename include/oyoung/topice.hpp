@@ -3,6 +3,9 @@
 
 #include <ros/node_handle.h>
 #include <string>
+#include <chrono>
+#include <future>
+// #include <iostream>
 
 namespace oyoung {
   
@@ -26,6 +29,11 @@ namespace oyoung {
       subscriber = node.subscribe<MSG>(topic, queue_size, std::move(func));
     }
     
+  };
+
+  enum class Status {
+    Success,
+    Timeout
   };
 
   template<typename Node>  
@@ -53,6 +61,36 @@ namespace oyoung {
       return server;
     } 
 
+
+
+    template<typename MReq, typename MRes, typename Rep, typename Period>
+    Status call(const std::string& service, const MReq& request, MRes& response, const std::chrono::duration<Rep, Period>& duration) {
+
+        auto requestTopic = service + "/request";
+        auto responseTopic = service + "/response";
+        auto promise = std::make_shared<std::promise<MRes>>();
+        auto future = promise->get_future();
+
+        auto subscriber = _node.subscribe<MRes>(responseTopic, 10, [=](const typename MRes::ConstPtr& res) {
+            // std::cout << "subscribed topic: " << responseTopic << std::endl;
+            promise->set_value(*res);
+        });
+
+        auto publisher = _node.advertise<MReq>(requestTopic, 10);
+        publisher.publish(request);
+
+        // std::cout << "publish" << std::endl; 
+
+        auto status =  future.wait_for(duration);
+        if(std::future_status::ready == status) {
+          response = future.get();
+        } else if(std::future_status::timeout == status) {
+          return Status::Timeout;
+        }
+
+        return Status::Success;
+
+    }
     
 
   private:
